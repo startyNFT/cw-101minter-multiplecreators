@@ -1,0 +1,36 @@
+[package]
+name = "multi-creator-minter"
+authors = ["Starty Team"]
+description = "Multi-creator NFT minter with allowlist and per-token royalties"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+library = []
+
+[dependencies]
+cosmwasm-schema.workspace = true
+cosmwasm-std.workspace = true
+cw2.workspace = true
+cw721.workspace = true
+cw721-base = { workspace = true, features = ["library"] }
+cw-storage-plus.workspace = true
+cw-utils.workspace = true
+cw-ownable.workspace = true
+schemars.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+url.workspace = true
+
+# Local dependency
+multi-creator-collection = { path = "../collection", features = ["library"] }
+
+[dev-dependencies]
+cw-multi-test = "2.3.0"
