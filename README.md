@@ -1,4 +1,4 @@
-# Starty Multi-Creator NFT Minter
+# Multi-Creator 1 of 1 NFT Minter
 
 A CosmWasm smart contract for Stargaze that enables **multiple creators to mint NFTs under a single collection**, with a **global royalty percentage** applied to all tokens. Uses **allowlist-based authentication** for minting access control.
 
