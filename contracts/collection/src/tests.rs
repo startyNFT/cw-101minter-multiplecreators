@@ -7,8 +7,9 @@ mod tests {
     use crate::error::ContractError;
     use crate::msg::{
         AllNftInfoResponse, CheckRoyaltiesResponse, CollectionExtension, CollectionInfoResponse,
-        ContractInfoResponse, ExecuteMsg, InstantiateMsg, MinterResponse, NftInfoResponse,
-        QueryMsg, RoyaltyInfoResponse, TokenExtension,
+        ContractInfoResponse, ExecuteMsg, GeneralRoyaltyInfo, GeneralRoyaltyInfoResponse,
+        InstantiateMsg, MinterResponse, NftInfoResponse, QueryMsg, RoyaltyInfoResponse,
+        TokenExtension,
     };
     use cw721::msg::{NumTokensResponse, OwnerOfResponse, TokensResponse};
     use cw721::Expiration;
@@ -53,7 +54,18 @@ mod tests {
         mock_addr("random_user")
     }
 
+    fn royalty_recipient_addr() -> Addr {
+        mock_addr("royalty_recipient")
+    }
+
     fn setup_contract(deps: cosmwasm_std::DepsMut) {
+        setup_contract_with_royalty(deps, None);
+    }
+
+    fn setup_contract_with_royalty(
+        deps: cosmwasm_std::DepsMut,
+        general_royalty: Option<GeneralRoyaltyInfo>,
+    ) {
         let msg = InstantiateMsg {
             name: "Test Collection".to_string(),
             symbol: "TEST".to_string(),
@@ -66,6 +78,7 @@ mod tests {
                 explicit_content: Some(false),
                 start_trading_time: None,
             }),
+            general_royalty,
         };
         let info = message_info(&creator_addr(), &[]);
         instantiate(deps, mock_env(), info, msg).unwrap();
@@ -131,6 +144,7 @@ mod tests {
             minter: minter_addr().to_string(),
             creator: None,
             collection_info: None,
+            general_royalty: None,
         };
         let info = message_info(&creator_addr(), &[]);
         instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
@@ -560,7 +574,7 @@ mod tests {
                 deps.as_ref(),
                 mock_env(),
                 QueryMsg::RoyaltyInfo {
-                    token_id: "1".to_string(),
+                    token_id: Some("1".to_string()),
                     sale_price: Uint128::new(1000),
                 },
             )
@@ -587,7 +601,7 @@ mod tests {
                 deps.as_ref(),
                 mock_env(),
                 QueryMsg::RoyaltyInfo {
-                    token_id: "1".to_string(),
+                    token_id: Some("1".to_string()),
                     sale_price: Uint128::new(10000),
                 },
             )
@@ -601,7 +615,7 @@ mod tests {
                 deps.as_ref(),
                 mock_env(),
                 QueryMsg::RoyaltyInfo {
-                    token_id: "2".to_string(),
+                    token_id: Some("2".to_string()),
                     sale_price: Uint128::new(10000),
                 },
             )
@@ -623,7 +637,7 @@ mod tests {
                 deps.as_ref(),
                 mock_env(),
                 QueryMsg::RoyaltyInfo {
-                    token_id: "1".to_string(),
+                    token_id: Some("1".to_string()),
                     sale_price: Uint128::new(1000),
                 },
             )
@@ -644,6 +658,216 @@ mod tests {
                 .unwrap();
 
         assert!(res.royalty_payments);
+    }
+
+    // ==================== General Royalty Tests ====================
+
+    #[test]
+    fn test_general_royalty_query() {
+        let mut deps = mock_dependencies();
+        let general_royalty = GeneralRoyaltyInfo {
+            address: royalty_recipient_addr().to_string(),
+            royalty_bps: 500, // 5%
+        };
+        setup_contract_with_royalty(deps.as_mut(), Some(general_royalty));
+
+        let res: GeneralRoyaltyInfoResponse =
+            from_json(query(deps.as_ref(), mock_env(), QueryMsg::GeneralRoyalty {}).unwrap())
+                .unwrap();
+
+        assert!(res.general_royalty.is_some());
+        let gr = res.general_royalty.unwrap();
+        assert_eq!(gr.address, royalty_recipient_addr().to_string());
+        assert_eq!(gr.royalty_bps, 500);
+    }
+
+    #[test]
+    fn test_general_royalty_query_none() {
+        let mut deps = mock_dependencies();
+        setup_contract(deps.as_mut()); // No general royalty set
+
+        let res: GeneralRoyaltyInfoResponse =
+            from_json(query(deps.as_ref(), mock_env(), QueryMsg::GeneralRoyalty {}).unwrap())
+                .unwrap();
+
+        assert!(res.general_royalty.is_none());
+    }
+
+    #[test]
+    fn test_royalty_info_falls_back_to_general() {
+        let mut deps = mock_dependencies();
+        let general_royalty = GeneralRoyaltyInfo {
+            address: royalty_recipient_addr().to_string(),
+            royalty_bps: 300, // 3%
+        };
+        setup_contract_with_royalty(deps.as_mut(), Some(general_royalty));
+
+        // Mint token without per-token royalty (creator and royalty_bps are None)
+        let msg = ExecuteMsg::Mint {
+            token_id: "1".to_string(),
+            owner: owner_addr().to_string(),
+            token_uri: Some("https://example.com/token/1".to_string()),
+            extension: TokenExtension {
+                creator: None,
+                royalty_bps: None,
+                minted_at: Some(Timestamp::from_seconds(1000000)),
+            },
+        };
+        let info = message_info(&minter_addr(), &[]);
+        execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+        // Query should return general royalty
+        let res: RoyaltyInfoResponse = from_json(
+            query(
+                deps.as_ref(),
+                mock_env(),
+                QueryMsg::RoyaltyInfo {
+                    token_id: Some("1".to_string()),
+                    sale_price: Uint128::new(10000),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(res.address, royalty_recipient_addr().to_string());
+        assert_eq!(res.royalty_amount, Uint128::new(300)); // 3% of 10000
+    }
+
+    #[test]
+    fn test_royalty_info_per_token_overrides_general() {
+        let mut deps = mock_dependencies();
+        let general_royalty = GeneralRoyaltyInfo {
+            address: royalty_recipient_addr().to_string(),
+            royalty_bps: 300, // 3%
+        };
+        setup_contract_with_royalty(deps.as_mut(), Some(general_royalty));
+
+        // Mint token with per-token royalty
+        mint_token(deps.as_mut(), "1", &owner_addr(), &creator_addr(), 700); // 7%
+
+        // Query should return per-token royalty, not general
+        let res: RoyaltyInfoResponse = from_json(
+            query(
+                deps.as_ref(),
+                mock_env(),
+                QueryMsg::RoyaltyInfo {
+                    token_id: Some("1".to_string()),
+                    sale_price: Uint128::new(10000),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(res.address, creator_addr().to_string());
+        assert_eq!(res.royalty_amount, Uint128::new(700)); // 7% of 10000, not 3%
+    }
+
+    #[test]
+    fn test_royalty_info_no_token_id_returns_general() {
+        let mut deps = mock_dependencies();
+        let general_royalty = GeneralRoyaltyInfo {
+            address: royalty_recipient_addr().to_string(),
+            royalty_bps: 500, // 5%
+        };
+        setup_contract_with_royalty(deps.as_mut(), Some(general_royalty));
+
+        // Query with no token_id should return general royalty
+        let res: RoyaltyInfoResponse = from_json(
+            query(
+                deps.as_ref(),
+                mock_env(),
+                QueryMsg::RoyaltyInfo {
+                    token_id: None,
+                    sale_price: Uint128::new(10000),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(res.address, royalty_recipient_addr().to_string());
+        assert_eq!(res.royalty_amount, Uint128::new(500)); // 5% of 10000
+    }
+
+    #[test]
+    fn test_royalty_info_no_token_id_no_general() {
+        let mut deps = mock_dependencies();
+        setup_contract(deps.as_mut()); // No general royalty
+
+        // Query with no token_id and no general royalty should return zero
+        let res: RoyaltyInfoResponse = from_json(
+            query(
+                deps.as_ref(),
+                mock_env(),
+                QueryMsg::RoyaltyInfo {
+                    token_id: None,
+                    sale_price: Uint128::new(10000),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(res.address, "");
+        assert_eq!(res.royalty_amount, Uint128::zero());
+    }
+
+    #[test]
+    fn test_update_general_royalty() {
+        let mut deps = mock_dependencies();
+        let general_royalty = GeneralRoyaltyInfo {
+            address: royalty_recipient_addr().to_string(),
+            royalty_bps: 500,
+        };
+        setup_contract_with_royalty(deps.as_mut(), Some(general_royalty));
+
+        // Update general royalty (only creator can do this)
+        let new_royalty = GeneralRoyaltyInfo {
+            address: other_creator_addr().to_string(),
+            royalty_bps: 800,
+        };
+        let msg = ExecuteMsg::UpdateGeneralRoyalty {
+            general_royalty: new_royalty,
+        };
+        let info = message_info(&creator_addr(), &[]);
+        execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+        // Verify update
+        let res: GeneralRoyaltyInfoResponse =
+            from_json(query(deps.as_ref(), mock_env(), QueryMsg::GeneralRoyalty {}).unwrap())
+                .unwrap();
+
+        let gr = res.general_royalty.unwrap();
+        assert_eq!(gr.address, other_creator_addr().to_string());
+        assert_eq!(gr.royalty_bps, 800);
+    }
+
+    #[test]
+    fn test_update_general_royalty_unauthorized() {
+        let mut deps = mock_dependencies();
+        let general_royalty = GeneralRoyaltyInfo {
+            address: royalty_recipient_addr().to_string(),
+            royalty_bps: 500,
+        };
+        setup_contract_with_royalty(deps.as_mut(), Some(general_royalty));
+
+        // Try to update as non-creator
+        let new_royalty = GeneralRoyaltyInfo {
+            address: random_user_addr().to_string(),
+            royalty_bps: 800,
+        };
+        let msg = ExecuteMsg::UpdateGeneralRoyalty {
+            general_royalty: new_royalty,
+        };
+        let info = message_info(&random_user_addr(), &[]);
+        let err = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
+
+        assert_eq!(
+            err,
+            ContractError::Unauthorized("Only creator can update general royalty".to_string())
+        );
     }
 
     // ==================== Query Tests ====================

@@ -1,13 +1,23 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::{Timestamp, Uint128};
 
-/// Per-token extension storing creator royalty info
+/// General/default royalty info for the collection
+#[cw_serde]
+#[derive(Default)]
+pub struct GeneralRoyaltyInfo {
+    /// Default royalty recipient address
+    pub address: String,
+    /// Default royalty percentage in basis points (e.g., 500 = 5%)
+    pub royalty_bps: u64,
+}
+
+/// Per-token extension storing optional creator royalty override
 #[cw_serde]
 #[derive(Default)]
 pub struct TokenExtension {
-    /// Creator address who receives royalties for this token
+    /// Creator address who receives royalties for this token (overrides general)
     pub creator: Option<String>,
-    /// Royalty percentage in basis points (e.g., 500 = 5%)
+    /// Royalty percentage in basis points (overrides general)
     pub royalty_bps: Option<u64>,
     /// When the token was minted
     pub minted_at: Option<Timestamp>,
@@ -36,6 +46,8 @@ pub struct InstantiateMsg {
     pub creator: Option<String>,
     /// Collection metadata
     pub collection_info: Option<CollectionExtension>,
+    /// General/default royalty info for the collection
+    pub general_royalty: Option<GeneralRoyaltyInfo>,
 }
 
 #[cw_serde]
@@ -86,20 +98,29 @@ pub enum ExecuteMsg {
     UpdateMinter {
         new_minter: Option<String>,
     },
+    /// Update general royalty info (only creator/admin)
+    UpdateGeneralRoyalty {
+        general_royalty: GeneralRoyaltyInfo,
+    },
 }
 
 #[cw_serde]
 #[derive(QueryResponses)]
 pub enum QueryMsg {
     /// CW2981: Get royalty info for a token sale
+    /// If token_id is provided, returns token-specific royalty if set, otherwise general royalty
+    /// If token_id is None, returns the general/default royalty info
     #[returns(RoyaltyInfoResponse)]
     RoyaltyInfo {
-        token_id: String,
+        token_id: Option<String>,
         sale_price: Uint128,
     },
     /// CW2981: Check if royalties are supported
     #[returns(CheckRoyaltiesResponse)]
     CheckRoyalties {},
+    /// Get general/default royalty info for the collection
+    #[returns(GeneralRoyaltyInfoResponse)]
+    GeneralRoyalty {},
     /// Get token info with extension
     #[returns(NftInfoResponse)]
     NftInfo {
@@ -176,6 +197,11 @@ pub struct RoyaltyInfoResponse {
 #[cw_serde]
 pub struct CheckRoyaltiesResponse {
     pub royalty_payments: bool,
+}
+
+#[cw_serde]
+pub struct GeneralRoyaltyInfoResponse {
+    pub general_royalty: Option<GeneralRoyaltyInfo>,
 }
 
 #[cw_serde]
