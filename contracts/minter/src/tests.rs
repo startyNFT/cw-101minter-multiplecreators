@@ -178,6 +178,7 @@ mod tests {
         // Mint
         let msg = ExecuteMsg::Mint {
             token_uri: "https://example.com/token/1.json".to_string(),
+            use_per_token_royalty: None, // defaults to true
         };
         app.execute_contract(minter1_addr(), minter_addr.clone(), &msg, &[])
             .unwrap();
@@ -206,6 +207,7 @@ mod tests {
         // Mint with IPFS URI
         let msg = ExecuteMsg::Mint {
             token_uri: "ipfs://QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG".to_string(),
+            use_per_token_royalty: None,
         };
         app.execute_contract(minter1_addr(), minter_addr.clone(), &msg, &[])
             .unwrap();
@@ -232,6 +234,7 @@ mod tests {
 
         let msg = ExecuteMsg::Mint {
             token_uri: "https://example.com/token/1.json".to_string(),
+            use_per_token_royalty: None,
         };
         let err = app
             .execute_contract(user_addr(), minter_addr, &msg, &[])
@@ -261,6 +264,7 @@ mod tests {
         // Try to mint
         let msg = ExecuteMsg::Mint {
             token_uri: "https://example.com/token/1.json".to_string(),
+            use_per_token_royalty: None,
         };
         let err = app
             .execute_contract(minter1_addr(), minter_addr, &msg, &[])
@@ -284,6 +288,7 @@ mod tests {
 
         let msg = ExecuteMsg::Mint {
             token_uri: "".to_string(),
+            use_per_token_royalty: None,
         };
         let err = app
             .execute_contract(minter1_addr(), minter_addr, &msg, &[])
@@ -307,6 +312,7 @@ mod tests {
 
         let msg = ExecuteMsg::Mint {
             token_uri: "http://example.com/token/1.json".to_string(), // http not allowed
+            use_per_token_royalty: None,
         };
         let err = app
             .execute_contract(minter1_addr(), minter_addr, &msg, &[])
@@ -330,6 +336,7 @@ mod tests {
 
         let msg = ExecuteMsg::Mint {
             token_uri: "not a valid uri".to_string(),
+            use_per_token_royalty: None,
         };
         let err = app
             .execute_contract(minter1_addr(), minter_addr, &msg, &[])
@@ -355,6 +362,7 @@ mod tests {
         for i in 1..=3 {
             let msg = ExecuteMsg::Mint {
                 token_uri: format!("https://example.com/token/{}.json", i),
+                use_per_token_royalty: None,
             };
             app.execute_contract(minter1_addr(), minter_addr.clone(), &msg, &[])
                 .unwrap();
@@ -364,6 +372,7 @@ mod tests {
         for i in 4..=5 {
             let msg = ExecuteMsg::Mint {
                 token_uri: format!("https://example.com/token/{}.json", i),
+                use_per_token_royalty: None,
             };
             app.execute_contract(minter2_addr(), minter_addr.clone(), &msg, &[])
                 .unwrap();
@@ -481,6 +490,7 @@ mod tests {
         // MINTER1 can no longer mint
         let msg = ExecuteMsg::Mint {
             token_uri: "https://example.com/token/1.json".to_string(),
+            use_per_token_royalty: None,
         };
         let err = app
             .execute_contract(minter1_addr(), minter_addr, &msg, &[])
@@ -731,9 +741,10 @@ mod tests {
             .unwrap();
         let collection_addr = config.config.collection.unwrap();
 
-        // Mint
+        // Mint (default: per-token royalty enabled)
         let msg = ExecuteMsg::Mint {
             token_uri: "https://example.com/token/1.json".to_string(),
+            use_per_token_royalty: None, // defaults to true
         };
         app.execute_contract(minter1_addr(), minter_addr.clone(), &msg, &[])
             .unwrap();
@@ -744,7 +755,7 @@ mod tests {
             .query_wasm_smart(
                 &collection_addr,
                 &multi_creator_collection::msg::QueryMsg::RoyaltyInfo {
-                    token_id: "1".to_string(),
+                    token_id: Some("1".to_string()),
                     sale_price: cosmwasm_std::Uint128::new(10000),
                 },
             )
@@ -776,6 +787,7 @@ mod tests {
         // MINTER1 mints token 1
         let msg = ExecuteMsg::Mint {
             token_uri: "https://example.com/token/1.json".to_string(),
+            use_per_token_royalty: None,
         };
         app.execute_contract(minter1_addr(), minter_addr.clone(), &msg, &[])
             .unwrap();
@@ -783,6 +795,7 @@ mod tests {
         // MINTER2 mints token 2
         let msg = ExecuteMsg::Mint {
             token_uri: "https://example.com/token/2.json".to_string(),
+            use_per_token_royalty: None,
         };
         app.execute_contract(minter2_addr(), minter_addr.clone(), &msg, &[])
             .unwrap();
@@ -793,7 +806,7 @@ mod tests {
             .query_wasm_smart(
                 &collection_addr,
                 &multi_creator_collection::msg::QueryMsg::RoyaltyInfo {
-                    token_id: "1".to_string(),
+                    token_id: Some("1".to_string()),
                     sale_price: cosmwasm_std::Uint128::new(1000),
                 },
             )
@@ -806,7 +819,7 @@ mod tests {
             .query_wasm_smart(
                 &collection_addr,
                 &multi_creator_collection::msg::QueryMsg::RoyaltyInfo {
-                    token_id: "2".to_string(),
+                    token_id: Some("2".to_string()),
                     sale_price: cosmwasm_std::Uint128::new(1000),
                 },
             )
@@ -836,6 +849,7 @@ mod tests {
         // Mint token 1 with 5% royalty
         let msg = ExecuteMsg::Mint {
             token_uri: "https://example.com/token/1.json".to_string(),
+            use_per_token_royalty: None,
         };
         app.execute_contract(minter1_addr(), minter_addr.clone(), &msg, &[])
             .unwrap();
@@ -848,6 +862,7 @@ mod tests {
         // Mint token 2 with 10% royalty
         let msg = ExecuteMsg::Mint {
             token_uri: "https://example.com/token/2.json".to_string(),
+            use_per_token_royalty: None,
         };
         app.execute_contract(minter1_addr(), minter_addr.clone(), &msg, &[])
             .unwrap();
@@ -858,7 +873,7 @@ mod tests {
             .query_wasm_smart(
                 &collection_addr,
                 &multi_creator_collection::msg::QueryMsg::RoyaltyInfo {
-                    token_id: "1".to_string(),
+                    token_id: Some("1".to_string()),
                     sale_price: cosmwasm_std::Uint128::new(10000),
                 },
             )
@@ -871,11 +886,190 @@ mod tests {
             .query_wasm_smart(
                 &collection_addr,
                 &multi_creator_collection::msg::QueryMsg::RoyaltyInfo {
-                    token_id: "2".to_string(),
+                    token_id: Some("2".to_string()),
                     sale_price: cosmwasm_std::Uint128::new(10000),
                 },
             )
             .unwrap();
         assert_eq!(royalty2.royalty_amount, cosmwasm_std::Uint128::new(1000)); // 10%
+    }
+
+    // ==================== Two-Tier Royalty Tests ====================
+
+    #[test]
+    fn test_mint_with_general_royalty_fallback() {
+        let mut app = mock_app();
+        let (minter_code_id, collection_code_id) = setup_contracts(&mut app);
+
+        let minter_addr = instantiate_minter(
+            &mut app,
+            minter_code_id,
+            collection_code_id,
+            vec![minter1_addr().to_string()],
+            500, // 5%
+        );
+
+        let config: ConfigResponse = app
+            .wrap()
+            .query_wasm_smart(&minter_addr, &QueryMsg::Config {})
+            .unwrap();
+        let collection_addr = config.config.collection.unwrap();
+
+        // Mint token WITHOUT per-token royalty (use general)
+        let msg = ExecuteMsg::Mint {
+            token_uri: "https://example.com/token/1.json".to_string(),
+            use_per_token_royalty: Some(false),
+        };
+        app.execute_contract(minter1_addr(), minter_addr.clone(), &msg, &[])
+            .unwrap();
+
+        // Query royalty - should return general royalty (admin is the recipient)
+        let royalty_res: multi_creator_collection::msg::RoyaltyInfoResponse = app
+            .wrap()
+            .query_wasm_smart(
+                &collection_addr,
+                &multi_creator_collection::msg::QueryMsg::RoyaltyInfo {
+                    token_id: Some("1".to_string()),
+                    sale_price: cosmwasm_std::Uint128::new(10000),
+                },
+            )
+            .unwrap();
+
+        // General royalty recipient is the admin
+        assert_eq!(royalty_res.address, admin_addr().to_string());
+        assert_eq!(royalty_res.royalty_amount, cosmwasm_std::Uint128::new(500)); // 5% of 10000
+    }
+
+    #[test]
+    fn test_general_royalty_query_from_minter() {
+        let mut app = mock_app();
+        let (minter_code_id, collection_code_id) = setup_contracts(&mut app);
+
+        let minter_addr = instantiate_minter(
+            &mut app,
+            minter_code_id,
+            collection_code_id,
+            vec![minter1_addr().to_string()],
+            500, // 5%
+        );
+
+        let config: ConfigResponse = app
+            .wrap()
+            .query_wasm_smart(&minter_addr, &QueryMsg::Config {})
+            .unwrap();
+        let collection_addr = config.config.collection.unwrap();
+
+        // Query general royalty
+        let general_royalty: multi_creator_collection::msg::GeneralRoyaltyInfoResponse = app
+            .wrap()
+            .query_wasm_smart(
+                &collection_addr,
+                &multi_creator_collection::msg::QueryMsg::GeneralRoyalty {},
+            )
+            .unwrap();
+
+        assert!(general_royalty.general_royalty.is_some());
+        let gr = general_royalty.general_royalty.unwrap();
+        assert_eq!(gr.address, admin_addr().to_string());
+        assert_eq!(gr.royalty_bps, 500);
+    }
+
+    #[test]
+    fn test_royalty_query_without_token_id_returns_general() {
+        let mut app = mock_app();
+        let (minter_code_id, collection_code_id) = setup_contracts(&mut app);
+
+        let minter_addr = instantiate_minter(
+            &mut app,
+            minter_code_id,
+            collection_code_id,
+            vec![minter1_addr().to_string()],
+            700, // 7%
+        );
+
+        let config: ConfigResponse = app
+            .wrap()
+            .query_wasm_smart(&minter_addr, &QueryMsg::Config {})
+            .unwrap();
+        let collection_addr = config.config.collection.unwrap();
+
+        // Query royalty without token_id
+        let royalty_res: multi_creator_collection::msg::RoyaltyInfoResponse = app
+            .wrap()
+            .query_wasm_smart(
+                &collection_addr,
+                &multi_creator_collection::msg::QueryMsg::RoyaltyInfo {
+                    token_id: None,
+                    sale_price: cosmwasm_std::Uint128::new(10000),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(royalty_res.address, admin_addr().to_string());
+        assert_eq!(royalty_res.royalty_amount, cosmwasm_std::Uint128::new(700)); // 7% of 10000
+    }
+
+    #[test]
+    fn test_mixed_per_token_and_general_royalties() {
+        let mut app = mock_app();
+        let (minter_code_id, collection_code_id) = setup_contracts(&mut app);
+
+        let minter_addr = instantiate_minter(
+            &mut app,
+            minter_code_id,
+            collection_code_id,
+            vec![minter1_addr().to_string(), minter2_addr().to_string()],
+            500, // 5% general royalty
+        );
+
+        let config: ConfigResponse = app
+            .wrap()
+            .query_wasm_smart(&minter_addr, &QueryMsg::Config {})
+            .unwrap();
+        let collection_addr = config.config.collection.unwrap();
+
+        // MINTER1 mints with per-token royalty
+        let msg = ExecuteMsg::Mint {
+            token_uri: "https://example.com/token/1.json".to_string(),
+            use_per_token_royalty: Some(true),
+        };
+        app.execute_contract(minter1_addr(), minter_addr.clone(), &msg, &[])
+            .unwrap();
+
+        // MINTER2 mints without per-token royalty (uses general)
+        let msg = ExecuteMsg::Mint {
+            token_uri: "https://example.com/token/2.json".to_string(),
+            use_per_token_royalty: Some(false),
+        };
+        app.execute_contract(minter2_addr(), minter_addr.clone(), &msg, &[])
+            .unwrap();
+
+        // Token 1: per-token royalty goes to MINTER1
+        let royalty1: multi_creator_collection::msg::RoyaltyInfoResponse = app
+            .wrap()
+            .query_wasm_smart(
+                &collection_addr,
+                &multi_creator_collection::msg::QueryMsg::RoyaltyInfo {
+                    token_id: Some("1".to_string()),
+                    sale_price: cosmwasm_std::Uint128::new(10000),
+                },
+            )
+            .unwrap();
+        assert_eq!(royalty1.address, minter1_addr().to_string());
+        assert_eq!(royalty1.royalty_amount, cosmwasm_std::Uint128::new(500)); // 5%
+
+        // Token 2: general royalty goes to ADMIN
+        let royalty2: multi_creator_collection::msg::RoyaltyInfoResponse = app
+            .wrap()
+            .query_wasm_smart(
+                &collection_addr,
+                &multi_creator_collection::msg::QueryMsg::RoyaltyInfo {
+                    token_id: Some("2".to_string()),
+                    sale_price: cosmwasm_std::Uint128::new(10000),
+                },
+            )
+            .unwrap();
+        assert_eq!(royalty2.address, admin_addr().to_string());
+        assert_eq!(royalty2.royalty_amount, cosmwasm_std::Uint128::new(500)); // 5%
     }
 }

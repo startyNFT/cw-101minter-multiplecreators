@@ -1,10 +1,13 @@
 use crate::error::ContractError;
 use crate::msg::{
     AllNftInfoResponse, CheckRoyaltiesResponse, CollectionInfoResponse, ContractInfoResponse,
-    ExecuteMsg, InstantiateMsg, MinterResponse, NftInfoResponse, QueryMsg, RoyaltyInfoResponse,
-    TokenExtension,
+    ExecuteMsg, GeneralRoyaltyInfo, GeneralRoyaltyInfoResponse, InstantiateMsg, MinterResponse,
+    NftInfoResponse, QueryMsg, RoyaltyInfoResponse, TokenExtension,
 };
-use crate::state::{CollectionConfig, TokenInfo, COLLECTION_INFO, CONFIG, OPERATORS, TOKENS, TOKEN_COUNT};
+use crate::state::{
+    CollectionConfig, TokenInfo, COLLECTION_INFO, CONFIG, GENERAL_ROYALTY, OPERATORS, TOKENS,
+    TOKEN_COUNT,
+};
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
@@ -47,6 +50,7 @@ pub fn instantiate(
 
     CONFIG.save(deps.storage, &config)?;
     COLLECTION_INFO.save(deps.storage, &msg.collection_info)?;
+    GENERAL_ROYALTY.save(deps.storage, &msg.general_royalty)?;
     TOKEN_COUNT.save(deps.storage, &0u64)?;
 
     Ok(Response::new()
@@ -91,6 +95,9 @@ pub fn execute(
         ExecuteMsg::RevokeAll { operator } => execute_revoke_all(deps, info, operator),
         ExecuteMsg::Burn { token_id } => execute_burn(deps, env, info, token_id),
         ExecuteMsg::UpdateMinter { new_minter } => execute_update_minter(deps, info, new_minter),
+        ExecuteMsg::UpdateGeneralRoyalty { general_royalty } => {
+            execute_update_general_royalty(deps, info, general_royalty)
+        }
     }
 }
 
@@ -384,6 +391,38 @@ fn execute_update_minter(
         ))
 }
 
+fn execute_update_general_royalty(
+    deps: DepsMut,
+    info: MessageInfo,
+    general_royalty: GeneralRoyaltyInfo,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+
+    // Only creator/admin can update general royalty
+    if config.creator != Some(info.sender.clone()) {
+        return Err(ContractError::Unauthorized(
+            "Only creator can update general royalty".to_string(),
+        ));
+    }
+
+    // Validate royalty address
+    deps.api.addr_validate(&general_royalty.address)?;
+
+    // Validate royalty doesn't exceed 100%
+    if general_royalty.royalty_bps > 10000 {
+        return Err(ContractError::Unauthorized(
+            "Royalty cannot exceed 100%".to_string(),
+        ));
+    }
+
+    GENERAL_ROYALTY.save(deps.storage, &Some(general_royalty.clone()))?;
+
+    Ok(Response::new()
+        .add_attribute("action", "update_general_royalty")
+        .add_attribute("address", general_royalty.address)
+        .add_attribute("royalty_bps", general_royalty.royalty_bps.to_string()))
+}
+
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
@@ -394,6 +433,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::CheckRoyalties {} => to_json_binary(&CheckRoyaltiesResponse {
             royalty_payments: true,
         }),
+        QueryMsg::GeneralRoyalty {} => to_json_binary(&query_general_royalty(deps)?),
         QueryMsg::NftInfo { token_id } => to_json_binary(&query_nft_info(deps, token_id)?),
         QueryMsg::AllNftInfo {
             token_id,
@@ -442,29 +482,62 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
 
 fn query_royalty_info(
     deps: Deps,
-    token_id: String,
+    token_id: Option<String>,
     sale_price: Uint128,
 ) -> StdResult<RoyaltyInfoResponse> {
-    let token = TOKENS.load(deps.storage, &token_id)?;
+    let general_royalty = GENERAL_ROYALTY.load(deps.storage)?;
 
-    let creator = token
-        .extension
-        .creator
-        .unwrap_or_default();
-    let royalty_bps = token.extension.royalty_bps.unwrap_or(0);
+    // If token_id is provided, check for token-specific royalty first
+    if let Some(tid) = token_id {
+        let token = TOKENS.load(deps.storage, &tid)?;
 
-    // Calculate royalty: sale_price * (royalty_bps / 10000)
-    let royalty_amount = if royalty_bps > 0 {
-        let royalty_decimal = Decimal::bps(royalty_bps);
-        sale_price.mul_floor(royalty_decimal)
-    } else {
-        Uint128::zero()
-    };
+        // Check if token has specific royalty info (both creator and royalty_bps must be set)
+        if token.extension.creator.is_some() && token.extension.royalty_bps.is_some() {
+            let creator = token.extension.creator.unwrap();
+            let royalty_bps = token.extension.royalty_bps.unwrap();
 
-    Ok(RoyaltyInfoResponse {
-        address: creator,
-        royalty_amount,
-    })
+            let royalty_amount = if royalty_bps > 0 {
+                let royalty_decimal = Decimal::bps(royalty_bps);
+                sale_price.mul_floor(royalty_decimal)
+            } else {
+                Uint128::zero()
+            };
+
+            return Ok(RoyaltyInfoResponse {
+                address: creator,
+                royalty_amount,
+            });
+        }
+    }
+
+    // Fallback to general royalty
+    match general_royalty {
+        Some(gr) => {
+            let royalty_amount = if gr.royalty_bps > 0 {
+                let royalty_decimal = Decimal::bps(gr.royalty_bps);
+                sale_price.mul_floor(royalty_decimal)
+            } else {
+                Uint128::zero()
+            };
+
+            Ok(RoyaltyInfoResponse {
+                address: gr.address,
+                royalty_amount,
+            })
+        }
+        None => {
+            // No royalty configured
+            Ok(RoyaltyInfoResponse {
+                address: String::new(),
+                royalty_amount: Uint128::zero(),
+            })
+        }
+    }
+}
+
+fn query_general_royalty(deps: Deps) -> StdResult<GeneralRoyaltyInfoResponse> {
+    let general_royalty = GENERAL_ROYALTY.load(deps.storage)?;
+    Ok(GeneralRoyaltyInfoResponse { general_royalty })
 }
 
 fn query_nft_info(deps: Deps, token_id: String) -> StdResult<NftInfoResponse> {

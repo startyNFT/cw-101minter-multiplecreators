@@ -7,4 +7,4 @@ pub mod state;
 mod tests;
 
 pub use crate::error::ContractError;
-pub use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, TokenExtension};
+pub use crate::msg::{ExecuteMsg, GeneralRoyaltyInfo, InstantiateMsg, QueryMsg, TokenExtension};

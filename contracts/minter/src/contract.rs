@@ -10,8 +10,8 @@ use cosmwasm_std::{
 use cw2::set_contract_version;
 use cw_utils::parse_instantiate_response_data;
 use multi_creator_collection::msg::{
-    CollectionExtension, ExecuteMsg as CollectionExecuteMsg, InstantiateMsg as CollectionInstantiateMsg,
-    TokenExtension,
+    CollectionExtension, ExecuteMsg as CollectionExecuteMsg, GeneralRoyaltyInfo,
+    InstantiateMsg as CollectionInstantiateMsg, TokenExtension,
 };
 use url::Url;
 
@@ -61,12 +61,19 @@ pub fn instantiate(
         start_trading_time: None,
     };
 
+    // Set up general royalty with admin as default recipient
+    let general_royalty = GeneralRoyaltyInfo {
+        address: admin.to_string(),
+        royalty_bps: msg.royalty_bps,
+    };
+
     let collection_msg = CollectionInstantiateMsg {
         name: msg.collection_params.name.clone(),
         symbol: msg.collection_params.symbol.clone(),
         minter: env.contract.address.to_string(),
         creator: Some(admin.to_string()),
         collection_info: Some(collection_info),
+        general_royalty: Some(general_royalty),
     };
 
     let wasm_msg = WasmMsg::Instantiate {
@@ -94,7 +101,10 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Mint { token_uri } => execute_mint(deps, env, info, token_uri),
+        ExecuteMsg::Mint {
+            token_uri,
+            use_per_token_royalty,
+        } => execute_mint(deps, env, info, token_uri, use_per_token_royalty),
         ExecuteMsg::AddToAllowlist { addresses } => execute_add_to_allowlist(deps, info, addresses),
         ExecuteMsg::RemoveFromAllowlist { addresses } => {
             execute_remove_from_allowlist(deps, info, addresses)
@@ -110,6 +120,7 @@ fn execute_mint(
     env: Env,
     info: MessageInfo,
     token_uri: String,
+    use_per_token_royalty: Option<bool>,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
 
@@ -148,11 +159,22 @@ fn execute_mint(
     // Generate token ID
     let token_id = increment_token_index(deps.storage)?.to_string();
 
-    // Create token extension with creator royalty info
-    let extension = TokenExtension {
-        creator: Some(info.sender.to_string()),
-        royalty_bps: Some(config.royalty_bps),
-        minted_at: Some(env.block.time),
+    // Create token extension
+    // If use_per_token_royalty is true (default), set per-token royalty with minter as creator
+    // If false, leave creator/royalty_bps as None to use general royalty
+    let use_per_token = use_per_token_royalty.unwrap_or(true);
+    let extension = if use_per_token {
+        TokenExtension {
+            creator: Some(info.sender.to_string()),
+            royalty_bps: Some(config.royalty_bps),
+            minted_at: Some(env.block.time),
+        }
+    } else {
+        TokenExtension {
+            creator: None,
+            royalty_bps: None,
+            minted_at: Some(env.block.time),
+        }
     };
 
     // Create mint message
@@ -174,7 +196,8 @@ fn execute_mint(
         .add_attribute("action", "mint")
         .add_attribute("token_id", token_id)
         .add_attribute("creator", info.sender)
-        .add_attribute("token_uri", token_uri))
+        .add_attribute("token_uri", token_uri)
+        .add_attribute("per_token_royalty", use_per_token.to_string()))
 }
 
 fn execute_add_to_allowlist(

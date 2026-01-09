@@ -24,7 +24,14 @@ pub struct InstantiateMsg {
 #[cw_serde]
 pub enum ExecuteMsg {
     /// Mint a new NFT (sender must be on allowlist)
-    Mint { token_uri: String },
+    /// If `use_per_token_royalty` is true (default), the token will have per-token royalty
+    /// with the minter as creator and the current royalty_bps from config.
+    /// If false, the token will use the collection's general royalty.
+    Mint {
+        token_uri: String,
+        /// Whether to set per-token royalty for this token (default: true)
+        use_per_token_royalty: Option<bool>,
+    },
     /// Add addresses to allowlist (admin only)
     AddToAllowlist { addresses: Vec<String> },
     /// Remove addresses from allowlist (admin only)
