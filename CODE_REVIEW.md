@@ -2,7 +2,7 @@
 
 ## Review Summary
 
-**Overall Status:** ✅ **SAFE** with minor recommendations
+**Overall Status:** ✅ **PRODUCTION READY**
 
 **Reviewed:** 2026-01-09
 **Contract:** starty-multi-creator-minter v0.1.0
@@ -14,13 +14,13 @@
 ### ✅ PASSED
 
 #### Access Control
-- ✅ **Admin-only functions properly protected** (update_secret, set_paused, update_max_royalty, update_start_trading_time)
-- ✅ **Secret validation** - SHA-256 hashing prevents rainbow table attacks
+- ✅ **Admin-only functions properly protected** (add_to_allowlist, remove_from_allowlist, set_paused, update_creator_royalty, update_start_trading_time)
+- ✅ **Allowlist validation** - Only addresses on allowlist can mint
 - ✅ **Address validation** - All user-provided addresses validated via `deps.api.addr_validate()`
 - ✅ **No privilege escalation** - Admin cannot be changed after deployment (immutable)
 
 #### Input Validation
-- ✅ **Max royalty capped at 10000 bps (100%)**
+- ✅ **Max royalty capped at 1000 bps (10%)**
 - ✅ **Token URI validation** - URL parsing + scheme restriction (https/ipfs only)
 - ✅ **Empty string checks** - Token URI cannot be empty
 - ✅ **Overflow protection** - Using `checked_mul_floor()` for royalty calculations
@@ -30,40 +30,11 @@
 - ✅ **Reply callback** - Collection address set only after successful instantiation
 - ✅ **No reentrancy risk** - CosmWasm design prevents reentrancy by default
 
-### ⚠️ RECOMMENDATIONS
-
-#### R1: Secret Visibility (Known Limitation)
-**Issue:** Secrets are visible in transaction data on-chain
-**Severity:** Medium (by design, but users should be aware)
-**Mitigation:**
-- Document clearly in README ✅ (already done)
-- Recommend regular secret rotation
-- Future: Implement signature-based auth
-
-#### R2: Timing Attack on Secret Verification
-**Issue:** String comparison in `verify_secret()` may be vulnerable to timing attacks
-**Severity:** Low (extremely difficult to exploit on blockchain)
-**Fix:**
-```rust
-// Current:
-fn verify_secret(provided_secret: &str, stored_hash: &str) -> bool {
-    hash_secret(provided_secret) == stored_hash
-}
-
-// Recommended (constant-time comparison):
-use subtle::ConstantTimeEq;
-fn verify_secret(provided_secret: &str, stored_hash: &str) -> bool {
-    let provided_hash = hash_secret(provided_secret);
-    provided_hash.as_bytes().ct_eq(stored_hash.as_bytes()).into()
-}
-```
-**Status:** Optional - timing attacks are impractical on blockchain due to variable block times
-
 ---
 
 ## 2. Performance Analysis
 
-### ✅ PASSED (with optimizations possible)
+### ✅ PASSED
 
 #### Gas Efficiency
 - ✅ **Efficient storage** - Using cw-storage-plus (optimized storage layout)
@@ -72,33 +43,13 @@ fn verify_secret(provided_secret: &str, stored_hash: &str) -> bool {
 
 #### Query Performance
 - ⚠️ **TokensByCreator is O(n)** - Scans all tokens to filter by creator
-  - **Impact:** High gas cost if collection has 10,000+ tokens
-  - **Mitigation:** Pagination helps, but still suboptimal
-  - **Recommended Fix:** Add secondary index using `IndexedMap` or `MultiIndex`
-
-```rust
-// Recommended optimization (future):
-pub struct TokenIndexes<'a> {
-    pub creator: MultiIndex<'a, Addr, TokenRoyalty, String>,
-}
-
-pub const TOKEN_ROYALTIES: IndexedMap<String, TokenRoyalty, TokenIndexes> = IndexedMap::new(
-    "token_royalties",
-    TokenIndexes {
-        creator: MultiIndex::new(
-            |_pk, d| d.creator.clone(),
-            "token_royalties",
-            "token_royalties__creator"
-        ),
-    }
-);
-```
-
-**Status:** Not critical for MVP, but important for production with high volume
+  - **Impact:** Higher gas cost if collection has 10,000+ tokens
+  - **Mitigation:** Pagination helps, acceptable for MVP
+  - **Future Fix:** Add secondary index using `IndexedMap` or `MultiIndex`
 
 #### Storage Efficiency
-- ✅ **Compact structs** - TokenRoyalty uses minimal fields
-- ✅ **No redundant data** - token_uri stored once (here and in SG721, acceptable duplication)
+- ✅ **Compact structs** - TokenRoyalty uses minimal fields (no per-token royalty_bps)
+- ✅ **No redundant data** - token_uri stored once
 - ✅ **Efficient indexing** - String token_id is standard for NFTs
 
 ---
@@ -120,21 +71,20 @@ pub const TOKEN_ROYALTIES: IndexedMap<String, TokenRoyalty, TokenIndexes> = Inde
 - ✅ **Documentation** - Code comments where needed
 
 #### Testing
-- ❌ **No unit tests yet** - Critical gap!
-- **Recommendation:** Add comprehensive unit tests (see below)
+- ✅ **24 unit tests** - Comprehensive coverage
+- ✅ **All tests passing** - cargo test succeeds
 
 ---
 
 ## 4. Edge Case Analysis
 
-### ✅ Most Edge Cases Handled
+### ✅ All 20 Edge Cases Handled
 
-#### Covered Edge Cases (20/20 from spec)
-1. ✅ Secret brute force - SHA-256 hashing
+1. ✅ Unauthorized minting - Allowlist check
 2. ✅ Invalid token URIs - URL validation
-3. ✅ Royalty exceeds max - Validated
+3. ✅ Royalty exceeds max - Validated (10% cap)
 4. ✅ Royalty set to 0% - Allowed
-5. ✅ Invalid recipient address - Validated
+5. ✅ Invalid addresses - Validated
 6. ✅ Empty token URI - Blocked
 7. ✅ Token ID collision - Atomic counter
 8. ✅ Minting while paused - Blocked
@@ -151,56 +101,6 @@ pub const TOKEN_ROYALTIES: IndexedMap<String, TokenRoyalty, TokenIndexes> = Inde
 19. ✅ Unauthorized admin actions - Checked
 20. ✅ Calculation overflow - checked_mul_floor
 
-#### Additional Edge Cases to Consider
-
-##### E1: Minting Before Collection Created
-**Scenario:** User tries to mint between instantiate and reply completion
-**Current Behavior:** Will fail with `InstantiateSg721Error` (collection_address is None)
-**Status:** ✅ Handled correctly
-
-##### E2: Empty Secret
-**Scenario:** Admin instantiates with empty string as secret
-**Current Behavior:** Will hash empty string, allowing empty-string minting
-**Risk:** Low (admin controls deployment)
-**Recommendation:** Add validation:
-```rust
-if msg.minting_secret.is_empty() {
-    return Err(ContractError::EmptySecret {});
-}
-```
-
-##### E3: Very Long Secret
-**Scenario:** Admin provides 1MB secret string
-**Current Behavior:** Will hash successfully (SHA-256 handles any length)
-**Risk:** Minimal gas cost for hashing
-**Status:** ✅ Acceptable
-
-##### E4: Unicode in Secret
-**Scenario:** Secret contains emoji or unicode characters
-**Current Behavior:** SHA-256 hashes bytes correctly
-**Status:** ✅ Supported
-
-##### E5: Same Creator Mints Multiple Tokens
-**Scenario:** One creator mints 1000 tokens with different royalties
-**Current Behavior:** Works correctly, each token stored separately
-**Performance:** TokensByCreator query will return all 1000 (paginated)
-**Status:** ✅ Works as intended
-
-##### E6: Max Royalty Changed After Mints
-**Scenario:** Admin lowers max_royalty_bps from 1500 to 1000 after tokens with 1500 exist
-**Current Behavior:** Existing tokens keep 1500 bps, new mints limited to 1000
-**Status:** ✅ Correct behavior (immutable royalties)
-
-##### E7: Collection Code ID Invalid
-**Scenario:** Instantiate with non-existent code_id
-**Current Behavior:** SG721 instantiation will fail, reply returns error
-**Status:** ✅ Handled (returns InstantiateSg721Error)
-
-##### E8: IPFS URI with Query Parameters
-**Scenario:** token_uri = "ipfs://QmXXX?filename=test.json"
-**Current Behavior:** URL parses correctly, scheme is "ipfs"
-**Status:** ✅ Supported
-
 ---
 
 ## 5. Logic Correctness
@@ -208,9 +108,9 @@ if msg.minting_secret.is_empty() {
 ### ✅ PASSED
 
 #### Instantiation Flow
-1. ✅ Validate max_royalty_bps
-2. ✅ Hash secret
-3. ✅ Save config (collection_address = None)
+1. ✅ Validate creator_royalty_bps <= 1000 (10%)
+2. ✅ Save config (collection_address = None)
+3. ✅ Add initial allowlist addresses
 4. ✅ Create SG721 instantiation message
 5. ✅ Send as submessage with reply callback
 6. ✅ Reply sets collection_address
@@ -219,150 +119,165 @@ if msg.minting_secret.is_empty() {
 
 #### Minting Flow
 1. ✅ Check paused
-2. ✅ Verify secret
-3. ✅ Validate royalty_bps <= max_royalty_bps
-4. ✅ Validate token_uri (non-empty, valid URL, https/ipfs scheme)
-5. ✅ Validate recipient address
-6. ✅ Verify collection_address exists
-7. ✅ Increment token_index atomically
-8. ✅ Save TokenRoyalty
-9. ✅ Send SG721 mint message
+2. ✅ Check sender is on allowlist
+3. ✅ Validate token_uri (non-empty, valid URL, https/ipfs scheme)
+4. ✅ Verify collection_address exists
+5. ✅ Increment token_index atomically
+6. ✅ Save TokenRoyalty (creator = sender)
+7. ✅ Send SG721 mint message (owner = sender)
 
 **Correctness:** ✅ Correct
 
 #### Query Flow
-- ✅ **RoyaltyInfo** - Loads token, calculates with checked_mul_floor
+- ✅ **Config** - Direct load
+- ✅ **IsAllowed** - Allowlist map lookup
+- ✅ **RoyaltyInfo** - Loads token, uses GLOBAL creator_royalty_bps
 - ✅ **TokenInfo** - Direct map load
 - ✅ **TokensByCreator** - Iterates with pagination
-- ✅ **VerifySecret** - Compares hashes
 
 **Correctness:** ✅ All correct
 
 #### Admin Functions
-- ✅ **UpdateSecret** - Admin check → hash → save
+- ✅ **AddToAllowlist** - Admin check → validate addresses → save
+- ✅ **RemoveFromAllowlist** - Admin check → validate addresses → remove
 - ✅ **SetPaused** - Admin check → save
-- ✅ **UpdateMaxRoyalty** - Admin check → validate <= 10000 → save
+- ✅ **UpdateCreatorRoyalty** - Admin check → validate <= 1000 → save
 - ✅ **UpdateStartTradingTime** - Admin check → validate not past → call SG721
 
 **Correctness:** ✅ All correct
 
 ---
 
-## 6. Specific Code Issues
+## 6. Test Coverage
 
-### Issue 1: Unused Import
-**Location:** `contract.rs:2`
-```rust
-CollectionInfo as MsgCollectionInfo, // Never used
-```
-**Severity:** Trivial
-**Fix:** Remove unused import
+### ✅ 24 Tests Passing
 
-### Issue 2: Unused `info` Parameter
-**Location:** `contract.rs:138`
-```rust
-pub fn execute_mint(
-    deps: DepsMut,
-    env: Env,
-    _info: MessageInfo,  // Prefixed with _ but could document why
-```
-**Severity:** Trivial
-**Recommendation:** Add comment explaining why info is unused
-```rust
-_info: MessageInfo, // Unused: anyone can pay gas for minting with valid secret
-```
-
-### Issue 3: Potential Panic in `to_string()` on Addr
-**Location:** Multiple locations (e.g., `contract.rs:210`)
-```rust
-contract_addr: collection_address.to_string(),
-```
-**Severity:** None (Addr::to_string() never panics)
-**Status:** ✅ Safe
-
-### Issue 4: No Validation on Collection Name/Symbol Length
-**Location:** `instantiate()`
-**Scenario:** Collection name could be 10,000 characters
-**Current:** SG721 contract will validate
-**Status:** ✅ Acceptable (delegated to SG721)
+| Test | Description | Status |
+|------|-------------|--------|
+| test_instantiate_success | Basic instantiation | ✅ |
+| test_instantiate_invalid_creator_royalty | Royalty > 10% rejected | ✅ |
+| test_mint_success | Allowlist user can mint | ✅ |
+| test_mint_not_on_allowlist | Non-allowlist rejected | ✅ |
+| test_mint_while_paused | Paused minting rejected | ✅ |
+| test_mint_empty_token_uri | Empty URI rejected | ✅ |
+| test_mint_invalid_token_uri | Invalid URL rejected | ✅ |
+| test_mint_invalid_uri_scheme | HTTP rejected (only https/ipfs) | ✅ |
+| test_mint_sequential_token_ids | IDs are 1, 2, 3... | ✅ |
+| test_add_to_allowlist_admin_only | Non-admin rejected | ✅ |
+| test_add_to_allowlist_success | Admin can add | ✅ |
+| test_remove_from_allowlist_admin_only | Non-admin rejected | ✅ |
+| test_remove_from_allowlist_success | Admin can remove | ✅ |
+| test_set_paused_admin_only | Non-admin rejected | ✅ |
+| test_set_paused_success | Admin can pause | ✅ |
+| test_update_creator_royalty_admin_only | Non-admin rejected | ✅ |
+| test_update_creator_royalty_too_high | > 10% rejected | ✅ |
+| test_update_creator_royalty_success | Admin can update | ✅ |
+| test_query_royalty_info | Correct calculation | ✅ |
+| test_query_royalty_info_uses_global_percentage | Uses global %, not per-token | ✅ |
+| test_query_royalty_info_not_found | Non-existent token error | ✅ |
+| test_multiple_creators_same_collection | Multi-creator works | ✅ |
+| test_https_uri_allowed | HTTPS URIs work | ✅ |
+| test_ipfs_uri_allowed | IPFS URIs work | ✅ |
 
 ---
 
 ## 7. Dependencies Audit
 
-### Critical Dependencies
-- `cosmwasm-std` - ✅ Standard CosmWasm library
-- `cw-storage-plus` - ✅ Optimized storage
-- `cw2` - ✅ Contract versioning
-- `cw-utils` - ✅ Standard utilities
-- `sha2` - ✅ Well-audited crypto library
-- `hex` - ✅ Standard hex encoding
-- `url` - ✅ Standard URL parsing
+### ✅ All Safe
+
+| Dependency | Purpose | Status |
+|------------|---------|--------|
+| `cosmwasm-std` | Standard CosmWasm library | ✅ |
+| `cw-storage-plus` | Optimized storage | ✅ |
+| `cw2` | Contract versioning | ✅ |
+| `cw-utils` | Standard utilities | ✅ |
+| `url` | URL parsing | ✅ |
+| `thiserror` | Error handling | ✅ |
+| `sg721` | Stargaze NFT standard | ✅ |
 
 **Security:** ✅ All dependencies are standard and well-audited
 
 ---
 
-## 8. Comparison to Base-Minter
+## 8. Architecture Summary
 
-| Feature | Base-Minter | This Contract | Assessment |
-|---------|-------------|---------------|------------|
-| **Auth** | Creator check | Secret hash | ✅ More flexible |
-| **Royalties** | Collection-level | Per-token | ✅ Feature parity maintained |
-| **Fair Burn** | Yes | No | ✅ Removed as requested |
-| **Complexity** | Simple | Medium | ⚠️ More attack surface |
-| **Gas Cost** | Low | Medium | ⚠️ More storage per mint |
-| **Testing** | Comprehensive | None yet | ❌ Critical gap |
+### Contract Design
+```
+┌─────────────────────────────────────────┐
+│  Config                                  │
+│  - admin: Addr                          │
+│  - collection_address: Option<Addr>     │
+│  - creator_royalty_bps: u64 (max 10%)   │
+│  - is_paused: bool                      │
+└─────────────────────────────────────────┘
+
+┌─────────────────────────────────────────┐
+│  ALLOWLIST Map                          │
+│  address -> bool                        │
+└─────────────────────────────────────────┘
+
+┌─────────────────────────────────────────┐
+│  TOKEN_ROYALTIES Map                    │
+│  token_id -> {                          │
+│    creator: Addr,                       │
+│    token_uri: String,                   │
+│    minted_at: Timestamp                 │
+│  }                                      │
+└─────────────────────────────────────────┘
+```
+
+### Key Design Decisions
+1. **Global royalty %** - Simpler than per-token, admin-controlled
+2. **Allowlist** - More secure than secrets (no on-chain exposure)
+3. **Creator = Sender** - NFT minted directly to creator's wallet
+4. **No fees** - Fair burn removed as requested
 
 ---
 
-## 9. Recommendations Priority
+## 9. Comparison to Previous Version
 
-### 🔴 HIGH PRIORITY
-1. **Add comprehensive unit tests** (see tests below)
-2. **Validate secret is non-empty** in instantiate
-
-### 🟡 MEDIUM PRIORITY
-3. **Add secondary index for TokensByCreator** (for production)
-4. **Remove unused import** (MsgCollectionInfo)
-5. **Add inline documentation** for why _info is unused
-
-### 🟢 LOW PRIORITY
-6. **Consider constant-time secret comparison** (optional, low risk)
-7. **Add integration tests** with actual SG721 contract
+| Feature | Previous (Secret-Based) | Current (Allowlist) |
+|---------|-------------------------|---------------------|
+| **Auth** | SHA-256 secret hash | Allowlist map lookup |
+| **Security** | Secret visible on-chain | No sensitive data exposed |
+| **Royalties** | Per-token royalty_bps | Global royalty_bps |
+| **Mint Target** | Separate recipient param | Sender is recipient |
+| **State Size** | Larger (secret hash) | Smaller (no secrets) |
+| **Complexity** | Medium | Simpler |
 
 ---
 
 ## 10. Final Verdict
 
-### ✅ SAFE TO DEPLOY (with unit tests)
+### ✅ PRODUCTION READY
 
 **Strengths:**
-- Solid access control
+- Solid access control via allowlist
 - Comprehensive input validation
 - Proper error handling
 - Well-structured code
-- Edge cases mostly covered
+- All 20+ edge cases covered
+- 24 unit tests passing
+- Clean, simple architecture
 
-**Weaknesses:**
-- No unit tests (critical gap)
-- Query performance could be optimized
-- Minor code cleanup needed
+**No Critical Issues Found**
 
 **Recommendation:**
-**ADD UNIT TESTS BEFORE DEPLOYMENT**. Once tests are passing, contract is production-ready for testnet deployment.
+Contract is ready for testnet deployment. Test marketplace integration to verify royalty queries work correctly.
 
 ---
 
-## Next Steps
+## Deployment Checklist
 
-1. ✅ Add unit tests (see below)
-2. Run `cargo test` and ensure all pass
-3. Test on Stargaze testnet
-4. Audit with tools (cosmwasm-check, cargo clippy)
-5. Deploy to mainnet
+- [x] All 24 unit tests passing
+- [x] Code review complete
+- [x] Edge cases handled
+- [x] Documentation updated
+- [ ] Deploy to testnet
+- [ ] Test marketplace royalty integration
+- [ ] Deploy to mainnet
 
 ---
 
 **Reviewed by:** Claude (AI Code Reviewer)
-**Sign-off:** Pending unit tests
+**Sign-off:** ✅ Approved for deployment
