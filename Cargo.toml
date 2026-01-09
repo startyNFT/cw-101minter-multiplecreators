@@ -1,5 +1,5 @@
 [workspace]
-members = ["contract"]
+members = ["contract", "royalty-splitter"]
 resolver = "2"
 
 [workspace.package]

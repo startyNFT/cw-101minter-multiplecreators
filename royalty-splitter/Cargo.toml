@@ -1,0 +1,27 @@
+[package]
+name = "royalty-splitter"
+version = "0.1.0"
+authors = ["Starty <dev@starty.xyz>"]
+edition = "2021"
+description = "Royalty splitter contract that distributes royalties to individual NFT creators"
+license = "Apache-2.0"
+repository = "https://github.com/startyNFT/cw-101minter-multiplecreators"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+library = []
+
+[dependencies]
+cosmwasm-schema = "1.5"
+cosmwasm-std = "1.5"
+cw-storage-plus = "1.2"
+cw2 = "1.1"
+thiserror = "1.0"
+schemars = "0.8"
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+
+[dev-dependencies]
+cosmwasm-schema = "1.5"
