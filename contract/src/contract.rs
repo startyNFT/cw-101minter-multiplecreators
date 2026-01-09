@@ -14,6 +14,7 @@ use cw2::set_contract_version;
 use cw_storage_plus::Bound;
 use cw_utils::parse_reply_instantiate_data;
 use sg721::{CollectionInfo as Sg721CollectionInfo, ExecuteMsg as Sg721ExecuteMsg, InstantiateMsg as Sg721InstantiateMsg};
+use sg721_royalty::msg::{TokenExtension, TokenRoyaltyInfo};
 use url::Url;
 
 const CONTRACT_NAME: &str = "crates.io:starty-multi-creator-minter";
@@ -170,12 +171,20 @@ pub fn execute_mint(
     };
     TOKEN_ROYALTIES.save(deps.storage, token_id.clone(), &token_royalty)?;
 
-    // Create mint message for SG721 collection
-    let mint_msg = Sg721ExecuteMsg::<Empty, Empty>::Mint {
+    // Create token extension with royalty info for the creator
+    let extension = TokenExtension {
+        royalty: Some(TokenRoyaltyInfo {
+            payment_address: info.sender.to_string(),
+            share: config.creator_royalty_bps,
+        }),
+    };
+
+    // Create mint message for SG721 collection with royalty extension
+    let mint_msg = Sg721ExecuteMsg::<TokenExtension, Empty>::Mint {
         token_id: token_id.clone(),
         owner: info.sender.to_string(),
         token_uri: Some(token_uri.clone()),
-        extension: Empty {},
+        extension,
     };
 
     let wasm_msg = WasmMsg::Execute {

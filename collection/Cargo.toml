@@ -1,0 +1,27 @@
+[package]
+name = "sg721-royalty"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+library = []
+
+[dependencies]
+cosmwasm-schema.workspace = true
+cosmwasm-std.workspace = true
+cw2.workspace = true
+cw721.workspace = true
+cw721-base.workspace = true
+cw-storage-plus.workspace = true
+schemars.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+sg721.workspace = true
+sg721-base.workspace = true
