@@ -1,32 +1,32 @@
 [workspace]
-members = ["contract", "collection"]
+members = ["contracts/minter", "contracts/collection"]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-homepage = "https://github.com/yourorg/starty-multi-creator-minter"
-repository = "https://github.com/yourorg/starty-multi-creator-minter"
+homepage = "https://github.com/startyNFT/cw-101minter-multiplecreators"
+repository = "https://github.com/startyNFT/cw-101minter-multiplecreators"
 license = "Apache-2.0"
 
 [workspace.dependencies]
-cosmwasm-schema = "1.5"
-cosmwasm-std = { version = "1.5.10", features = ["cosmwasm_1_4"] }
-cw2 = "1.1"
-cw721 = "0.18"
-cw721-base = "0.18"
-cw-storage-plus = "1.2"
-cw-utils = "1.0"
-schemars = "0.8"
+cosmwasm-schema = "2.2.1"
+cosmwasm-std = { version = "2.2.1", features = ["cosmwasm_2_1"] }
+cw2 = "2.0.0"
+cw721 = "0.20.0"
+cw721-base = "0.20.0"
+cw-storage-plus = "2.0.0"
+cw-utils = "2.0.0"
+cw-ownable = "2.0.0"
+schemars = "0.8.11"
 serde = { version = "1.0", default-features = false, features = ["derive"] }
-thiserror = "1.0"
-url = "2.5"
+thiserror = "1.0.31"
+url = "2.2.2"
 
-# Stargaze-specific dependencies from git
-base-factory = { git = "https://github.com/public-awesome/launchpad", branch = "main" }
-sg1 = { git = "https://github.com/public-awesome/launchpad", branch = "main" }
-sg2 = { git = "https://github.com/public-awesome/launchpad", branch = "main" }
-sg4 = { git = "https://github.com/public-awesome/launchpad", branch = "main" }
-sg721 = { git = "https://github.com/public-awesome/launchpad", branch = "main" }
-sg721-base = { git = "https://github.com/public-awesome/launchpad", branch = "main" }
-sg-utils = { git = "https://github.com/public-awesome/launchpad", branch = "main" }
+[profile.release]
+rpath = false
+lto = true
+overflow-checks = true
+opt-level = 3
+debug = false
+debug-assertions = false

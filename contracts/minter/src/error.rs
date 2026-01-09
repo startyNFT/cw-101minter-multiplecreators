@@ -1,4 +1,4 @@
-use cosmwasm_std::{StdError, Timestamp};
+use cosmwasm_std::StdError;
 use thiserror::Error;
 use url::ParseError;
 
@@ -19,8 +19,8 @@ pub enum ContractError {
     #[error("Minting is currently paused")]
     MintingPaused {},
 
-    #[error("Invalid creator royalty: cannot exceed 1000 basis points (10%)")]
-    InvalidCreatorRoyalty {},
+    #[error("Invalid royalty: cannot exceed 1000 basis points (10%)")]
+    InvalidRoyalty {},
 
     #[error("Invalid token URI: {uri}")]
     InvalidTokenUri { uri: String },
@@ -31,21 +31,12 @@ pub enum ContractError {
     #[error("Empty token URI not allowed")]
     EmptyTokenUri {},
 
-    #[error("Token not found: {token_id}")]
-    TokenNotFound { token_id: String },
+    #[error("Collection not initialized")]
+    CollectionNotInitialized {},
 
     #[error("Invalid reply ID")]
-    InvalidReplyID {},
+    InvalidReplyId {},
 
-    #[error("Instantiate sg721 error")]
-    InstantiateSg721Error {},
-
-    #[error("Invalid start trading time: {0} < {1}")]
-    InvalidStartTradingTime(Timestamp, Timestamp),
-
-    #[error("Trading time cannot be in the past")]
-    TradingTimeInPast {},
-
-    #[error("Calculation overflow")]
-    CalculationOverflow {},
+    #[error("Failed to instantiate collection")]
+    InstantiateCollectionError {},
 }
