@@ -5,8 +5,8 @@ use crate::msg::{
     NftInfoResponse, QueryMsg, RoyaltyInfoResponse, TokenExtension,
 };
 use crate::state::{
-    CollectionConfig, TokenInfo, COLLECTION_INFO, CONFIG, GENERAL_ROYALTY, OPERATORS, TOKENS,
-    TOKEN_COUNT,
+    CollectionConfig, TokenInfo, COLLECTION_INFO, CONFIG, GENERAL_ROYALTY, OPERATORS,
+    OWNER_TOKENS, TOKENS, TOKEN_APPROVALS, TOKEN_COUNT,
 };
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
@@ -127,14 +127,15 @@ fn execute_mint(
         owner: owner_addr.clone(),
         token_uri: token_uri.clone(),
         extension,
-        approvals: vec![],
     };
 
     TOKENS.save(deps.storage, &token_id, &token_info)?;
 
-    // Increment token count
-    let count = TOKEN_COUNT.load(deps.storage)?;
-    TOKEN_COUNT.save(deps.storage, &(count + 1))?;
+    // Add to owner index for O(1) lookups
+    OWNER_TOKENS.save(deps.storage, (&owner_addr, &token_id), &())?;
+
+    // Increment token count (optimized: use update instead of load+save)
+    TOKEN_COUNT.update(deps.storage, |count| Ok::<_, ContractError>(count + 1))?;
 
     Ok(Response::new()
         .add_attribute("action", "mint")
@@ -196,11 +197,26 @@ fn _transfer(
     })?;
 
     // Check authorization
-    check_can_send(deps.as_ref(), &env, &info, &token)?;
+    check_can_send(deps.as_ref(), &env, &info, &token, &token_id)?;
 
-    // Update owner and clear approvals
+    let old_owner = token.owner.clone();
+
+    // Update owner index: remove from old owner, add to new owner
+    OWNER_TOKENS.remove(deps.storage, (&old_owner, &token_id));
+    OWNER_TOKENS.save(deps.storage, (&recipient, &token_id), &())?;
+
+    // Clear all token approvals (optimized: iterate and remove)
+    let approvals_to_remove: Vec<Addr> = TOKEN_APPROVALS
+        .prefix(&token_id)
+        .keys(deps.storage, None, None, Order::Ascending)
+        .filter_map(|r| r.ok())
+        .collect();
+    for spender in approvals_to_remove {
+        TOKEN_APPROVALS.remove(deps.storage, (&token_id, &spender));
+    }
+
+    // Update owner
     token.owner = recipient;
-    token.approvals.clear();
     TOKENS.save(deps.storage, &token_id, &token)?;
 
     Ok(())
@@ -211,6 +227,7 @@ fn check_can_send(
     env: &Env,
     info: &MessageInfo,
     token: &TokenInfo,
+    token_id: &str,
 ) -> Result<(), ContractError> {
     // Owner can always send
     if token.owner == info.sender {
@@ -224,9 +241,9 @@ fn check_can_send(
         }
     }
 
-    // Check token-level approval
-    for approval in &token.approvals {
-        if approval.spender == info.sender && !approval.expires.is_expired(&env.block) {
+    // Check token-level approval (optimized: direct lookup instead of iteration)
+    if let Some(exp) = TOKEN_APPROVALS.may_load(deps.storage, (token_id, &info.sender))? {
+        if !exp.is_expired(&env.block) {
             return Ok(());
         }
     }
@@ -243,7 +260,7 @@ fn execute_approve(
     expires: Option<Expiration>,
 ) -> Result<Response, ContractError> {
     let spender_addr = deps.api.addr_validate(&spender)?;
-    let mut token = TOKENS.load(deps.storage, &token_id).map_err(|_| {
+    let token = TOKENS.load(deps.storage, &token_id).map_err(|_| {
         ContractError::TokenNotFound {
             token_id: token_id.clone(),
         }
@@ -256,16 +273,9 @@ fn execute_approve(
         ));
     }
 
-    // Remove existing approval if any
-    token.approvals.retain(|a| a.spender != spender_addr);
-
-    // Add new approval
-    token.approvals.push(cw721::Approval {
-        spender: spender_addr.clone(),
-        expires: expires.unwrap_or(Expiration::Never {}),
-    });
-
-    TOKENS.save(deps.storage, &token_id, &token)?;
+    // Save approval to separate storage (optimized: no need to load/save entire token)
+    let exp = expires.unwrap_or(Expiration::Never {});
+    TOKEN_APPROVALS.save(deps.storage, (&token_id, &spender_addr), &exp)?;
 
     Ok(Response::new()
         .add_attribute("action", "approve")
@@ -281,7 +291,7 @@ fn execute_revoke(
     token_id: String,
 ) -> Result<Response, ContractError> {
     let spender_addr = deps.api.addr_validate(&spender)?;
-    let mut token = TOKENS.load(deps.storage, &token_id).map_err(|_| {
+    let token = TOKENS.load(deps.storage, &token_id).map_err(|_| {
         ContractError::TokenNotFound {
             token_id: token_id.clone(),
         }
@@ -294,8 +304,8 @@ fn execute_revoke(
         ));
     }
 
-    token.approvals.retain(|a| a.spender != spender_addr);
-    TOKENS.save(deps.storage, &token_id, &token)?;
+    // Remove from separate approvals storage (optimized: no need to load/save entire token)
+    TOKEN_APPROVALS.remove(deps.storage, (&token_id, &spender_addr));
 
     Ok(Response::new()
         .add_attribute("action", "revoke")
@@ -353,11 +363,23 @@ fn execute_burn(
         ));
     }
 
+    // Remove from owner index
+    OWNER_TOKENS.remove(deps.storage, (&token.owner, &token_id));
+
+    // Clear all token approvals
+    let approvals_to_remove: Vec<Addr> = TOKEN_APPROVALS
+        .prefix(&token_id)
+        .keys(deps.storage, None, None, Order::Ascending)
+        .filter_map(|r| r.ok())
+        .collect();
+    for spender in approvals_to_remove {
+        TOKEN_APPROVALS.remove(deps.storage, (&token_id, &spender));
+    }
+
     TOKENS.remove(deps.storage, &token_id);
 
-    // Decrement token count
-    let count = TOKEN_COUNT.load(deps.storage)?;
-    TOKEN_COUNT.save(deps.storage, &count.saturating_sub(1))?;
+    // Decrement token count (optimized: use update)
+    TOKEN_COUNT.update(deps.storage, |count| Ok::<_, ContractError>(count.saturating_sub(1)))?;
 
     Ok(Response::new()
         .add_attribute("action", "burn")
@@ -557,10 +579,13 @@ fn query_all_nft_info(
     let token = TOKENS.load(deps.storage, &token_id)?;
     let include_expired = include_expired.unwrap_or(false);
 
-    let approvals: Vec<cw721::Approval> = token
-        .approvals
-        .into_iter()
-        .filter(|a| include_expired || !a.expires.is_expired(&env.block))
+    // Get approvals from separate storage
+    let approvals: Vec<cw721::Approval> = TOKEN_APPROVALS
+        .prefix(&token_id)
+        .range(deps.storage, None, None, Order::Ascending)
+        .filter_map(|r| r.ok())
+        .filter(|(_, exp)| include_expired || !exp.is_expired(&env.block))
+        .map(|(spender, exp)| cw721::Approval { spender, expires: exp })
         .collect();
 
     Ok(AllNftInfoResponse {
@@ -584,10 +609,13 @@ fn query_owner_of(
     let token = TOKENS.load(deps.storage, &token_id)?;
     let include_expired = include_expired.unwrap_or(false);
 
-    let approvals: Vec<cw721::Approval> = token
-        .approvals
-        .into_iter()
-        .filter(|a| include_expired || !a.expires.is_expired(&env.block))
+    // Get approvals from separate storage
+    let approvals: Vec<cw721::Approval> = TOKEN_APPROVALS
+        .prefix(&token_id)
+        .range(deps.storage, None, None, Order::Ascending)
+        .filter_map(|r| r.ok())
+        .filter(|(_, exp)| include_expired || !exp.is_expired(&env.block))
+        .map(|(spender, exp)| cw721::Approval { spender, expires: exp })
         .collect();
 
     Ok(cw721::msg::OwnerOfResponse {
@@ -656,12 +684,12 @@ fn query_tokens(
     let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
     let start = start_after.as_deref().map(Bound::exclusive);
 
-    let tokens: Vec<String> = TOKENS
-        .range(deps.storage, start, None, Order::Ascending)
-        .filter_map(|r| r.ok())
-        .filter(|(_, info)| info.owner == owner_addr)
+    // Optimized: Use owner index for O(1) lookups instead of scanning all tokens
+    let tokens: Vec<String> = OWNER_TOKENS
+        .prefix(&owner_addr)
+        .keys(deps.storage, start, None, Order::Ascending)
         .take(limit)
-        .map(|(id, _)| id)
+        .filter_map(|r| r.ok())
         .collect();
 
     Ok(cw721::msg::TokensResponse { tokens })
@@ -708,18 +736,24 @@ fn query_approval(
     spender: String,
     include_expired: Option<bool>,
 ) -> StdResult<cw721::msg::ApprovalResponse> {
-    let token = TOKENS.load(deps.storage, &token_id)?;
+    // Verify token exists
+    let _ = TOKENS.load(deps.storage, &token_id)?;
     let spender_addr = deps.api.addr_validate(&spender)?;
     let include_expired = include_expired.unwrap_or(false);
 
-    let approval = token
-        .approvals
-        .into_iter()
-        .find(|a| a.spender == spender_addr && (include_expired || !a.expires.is_expired(&env.block)))
-        .unwrap_or(cw721::Approval {
+    // Get approval from separate storage (optimized: direct lookup)
+    let approval = match TOKEN_APPROVALS.may_load(deps.storage, (&token_id, &spender_addr))? {
+        Some(exp) if include_expired || !exp.is_expired(&env.block) => {
+            cw721::Approval {
+                spender: spender_addr,
+                expires: exp,
+            }
+        }
+        _ => cw721::Approval {
             spender: spender_addr,
             expires: Expiration::Never {},
-        });
+        },
+    };
 
     Ok(cw721::msg::ApprovalResponse { approval })
 }
@@ -730,13 +764,17 @@ fn query_approvals(
     token_id: String,
     include_expired: Option<bool>,
 ) -> StdResult<cw721::msg::ApprovalsResponse> {
-    let token = TOKENS.load(deps.storage, &token_id)?;
+    // Verify token exists
+    let _ = TOKENS.load(deps.storage, &token_id)?;
     let include_expired = include_expired.unwrap_or(false);
 
-    let approvals: Vec<cw721::Approval> = token
-        .approvals
-        .into_iter()
-        .filter(|a| include_expired || !a.expires.is_expired(&env.block))
+    // Get approvals from separate storage
+    let approvals: Vec<cw721::Approval> = TOKEN_APPROVALS
+        .prefix(&token_id)
+        .range(deps.storage, None, None, Order::Ascending)
+        .filter_map(|r| r.ok())
+        .filter(|(_, exp)| include_expired || !exp.is_expired(&env.block))
+        .map(|(spender, exp)| cw721::Approval { spender, expires: exp })
         .collect();
 
     Ok(cw721::msg::ApprovalsResponse { approvals })
